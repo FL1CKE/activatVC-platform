@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-brand-light text-brand-dark font-sans;
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.prose p {
+  margin: 0.5rem 0;
+}

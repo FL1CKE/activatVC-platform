@@ -1,0 +1,89 @@
+name: Agents Platform CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: adminpassword
+          POSTGRES_DB: agents_platform_test
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PYTHONPATH: .
+      DATABASE_URL: postgresql+asyncpg://admin:adminpassword@localhost:5433/agents_platform_test
+      TEST_DATABASE_URL: postgresql+asyncpg://admin:adminpassword@localhost:5433/agents_platform_test
+      DEBUG: "true"
+      OPENAI_API_KEY: sk-test-fake
+      SECRET_KEY: test-secret
+      STORAGE_PATH: /tmp/storage
+      PROMPTS_PATH: /tmp/storage/prompts
+      REPORTS_PATH: /tmp/storage/reports
+      ORCHESTRATION_MODE: standalone
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies (Cairo)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev pkg-config python3-dev
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --no-cache-dir -r requirements.txt
+          pip install asyncpg pytest pytest-asyncio httpx
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+  deploy-test:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    needs: test
+    environment: testing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Add host to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy to test server
+        run: |
+          ssh -o StrictHostKeyChecking=no "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" '
+            set -e
+            cd "${{ secrets.SERVER_PATH }}"
+            git pull origin main
+            docker compose up --build -d app
+            sleep 15
+            docker compose ps app
+            docker compose logs app --tail=20
+          '

@@ -1,0 +1,103 @@
+services:
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: adminpassword
+      POSTGRES_DB: activat_db
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d activat_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shared_net
+
+  minio:
+    image: minio/minio
+    container_name: startup_automation_minio
+    restart: unless-stopped
+    ports:
+      - "${MINIO_API_HOST_PORT:-9100}:9000"
+      - "${MINIO_CONSOLE_HOST_PORT:-9101}:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - shared_net
+
+  minio-init:
+    image: minio/mc
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set local http://minio:9000 minioadmin minioadmin) do echo 'waiting for minio' && sleep 1; done;
+      exit 0;
+      "
+    networks:
+      - shared_net
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+    environment:
+      DATABASE_URL: postgresql://admin:adminpassword@postgres:5432/activat_db?schema=public
+      PORT: ${APP_CONTAINER_PORT:-3000}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-http://127.0.0.1:3100}
+      APP_INTERNAL_URL: http://app:${APP_CONTAINER_PORT:-3000}
+      S3_ENDPOINT: http://minio:9000
+      S3_PUBLIC_ENDPOINT: ${S3_PUBLIC_ENDPOINT:-http://127.0.0.1:9100}
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      AGENT_EXECUTION_MODE: ${AGENT_EXECUTION_MODE:-mock}
+      AGENTS_PLATFORM_URL: ${AGENTS_PLATFORM_URL:-http://127.0.0.1:8888}
+      MASTER_ORCHESTRATOR_MODE: ${MASTER_ORCHESTRATOR_MODE:-deterministic}
+      MASTER_ORCHESTRATOR_PROMPT_PATH: ${MASTER_ORCHESTRATOR_PROMPT_PATH:-./config/master_orchestrator_prompt_v4.md}
+      MASTER_ORCHESTRATOR_PROVIDER: ${MASTER_ORCHESTRATOR_PROVIDER:-openai}
+      MASTER_ORCHESTRATOR_MODEL: ${MASTER_ORCHESTRATOR_MODEL:-gpt-4o-mini}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    volumes:
+      - ./storage:/app/storage
+    ports:
+      - "${APP_HOST_PORT:-3100}:${APP_CONTAINER_PORT:-3000}"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:${APP_CONTAINER_PORT:-3000}/health', r => { process.exit(r.statusCode === 200 ? 0 : 1) }).on('error', () => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - shared_net
+
+networks:
+  shared_net:
+    external: true
+
+volumes:
+  postgres_data:
+  minio_data:

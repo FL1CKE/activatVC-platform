@@ -1,0 +1,119 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Application {
+  id                  String                @id @default(uuid())
+  startupName         String
+  founderEmail        String
+  status              String                @default("submitted")
+  startupType         String?
+  startupStage        String?
+  activityType        String?
+  description         String?
+  businessModel       String?
+  financialSummary    String?
+  websiteUrl          String?
+  driveLink           String?
+  investmentAmount    Float?
+  currency            String?               @default("USD")
+  founders            Json?
+  founderProfiles     Json?
+  latestDocumentIndex Json?
+  currentRound        Int                   @default(0)
+  investmentScore     Float?
+  verdict             String?
+  heroPhrase          String?
+  executiveSummary    String?
+  interviewQuestions  Json?
+  aggregateReport     Json?
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  documents           ApplicationDocument[]
+  gapItems            GapItem[]
+  magicLinks          MagicLinkSession[]
+  agentRuns           AgentRun[]
+  events              ApplicationEvent[]
+}
+
+model ApplicationDocument {
+  id              String      @id @default(uuid())
+  applicationId   String
+  documentType    String
+  category        String
+  classifiedAs    String
+  fileUrl         String
+  storageKey      String
+  originalName    String
+  mimeType        String?
+  sizeBytes       Int?
+  readable        Boolean     @default(true)
+  summary         String?
+  source          String      @default("founder_upload")
+  uploadedAt      DateTime    @default(now())
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  responseForGaps GapItem[]   @relation("GapResponseDocument")
+}
+
+model GapItem {
+  id                 String               @id @default(uuid())
+  applicationId      String
+  source             String
+  gapType            String
+  status             String               @default("open")
+  title              String
+  description        String
+  question           String
+  inputType          String
+  requestedByAgent   String?
+  affectsAgents      Json?
+  responseText       String?
+  responseDocumentId String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  resolvedAt         DateTime?
+  application        Application          @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  responseDocument   ApplicationDocument? @relation("GapResponseDocument", fields: [responseDocumentId], references: [id], onDelete: SetNull)
+}
+
+model MagicLinkSession {
+  id             String      @id @default(uuid())
+  applicationId  String
+  token          String      @unique
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  lastAccessedAt DateTime?
+  application    Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model AgentRun {
+  id                 String      @id @default(uuid())
+  applicationId      String
+  agentName          String
+  round              Int
+  status             String
+  promptSetVersion   String?
+  requestPayload     Json
+  responsePayload    Json?
+  score              Float?
+  requestedDocuments Json?
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+  completedAt        DateTime?
+  application        Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}
+
+model ApplicationEvent {
+  id            String      @id @default(uuid())
+  applicationId String
+  eventType     String
+  message       String
+  payload       Json?
+  createdAt     DateTime    @default(now())
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+}

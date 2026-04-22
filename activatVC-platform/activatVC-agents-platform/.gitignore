@@ -1,0 +1,12 @@
+.env
+doc_*.env
+.venv/
+.idea/
+__pycache__/
+*.pyc
+*.db
+*.db-journal
+.pytest_cache/
+.mypy_cache/
+storage/
+frontend/

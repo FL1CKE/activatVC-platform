@@ -1,0 +1,10 @@
+title = "Startup Automation Gitleaks Config"
+
+[allowlist]
+description = "Allow known placeholders in examples and tests"
+regexes = [
+  '''sk-test-fake''',
+  '''<SET_IN_LOCAL_.env_ONLY>''',
+  '''OPENAI_API_KEY=sk-\.\.\.''',
+  '''ANTHROPIC_API_KEY=sk-ant-\.\.\.'''
+]

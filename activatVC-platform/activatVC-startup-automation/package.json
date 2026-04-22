@@ -1,0 +1,43 @@
+{
+  "name": "startup-automation",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "predev": "ts-node scripts/validate_env.ts",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "prestart": "ts-node scripts/validate_env.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "smoke:relay": "node scripts/relay-loop-smoke.mjs",
+    "smoke:relay:strict": "set RELAY_SMOKE_STRICT=1&& node scripts/relay-loop-smoke.mjs",
+    "prisma:generate": "prisma generate",
+    "postinstall": "prisma generate"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "Master agent workflow demo for startup intake and mock specialist orchestration.",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.710.0",
+    "@prisma/client": "^6.19.2",
+    "@types/pdfkit": "^0.17.5",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2",
+    "helmet": "^8.1.0",
+    "multer": "^1.4.5-lts.1",
+    "pdfkit": "^0.18.0",
+    "uuid": "^11.0.3"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.6",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.13.1",
+    "@types/uuid": "^10.0.0",
+    "prisma": "^6.19.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3"
+  }
+}

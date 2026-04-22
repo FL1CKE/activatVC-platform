@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "[pre-commit] gitleaks is not installed."
+  echo "Install: https://github.com/gitleaks/gitleaks#installation"
+  echo "Then retry commit."
+  exit 1
+fi
+
+echo "[pre-commit] Running gitleaks on staged changes..."
+gitleaks protect --staged --redact --verbose --config .gitleaks.toml
