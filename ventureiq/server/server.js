@@ -172,7 +172,7 @@ app.post("/api/chat", async (req, res) => {
 // ── Proxy to Python backend (activatVC-agents-platform) ──────────────────────
 // Used in production when both servers run behind nginx.
 // In dev, Vite handles /api/platform → Python via vite.config.js proxy.
-app.all("/api/platform/*path", async (req, res) => {
+app.all("/api/platform/*", async (req, res) => {
   const targetPath = req.path.replace("/api/platform", "/api/v1");
   const url = `${PYTHON_BACKEND_URL}${targetPath}${req.url.includes("?") ? "?" + req.url.split("?")[1] : ""}`;
 
