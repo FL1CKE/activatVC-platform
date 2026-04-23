@@ -65,19 +65,20 @@ def do_run_migrations(connection: Connection) -> None:
 
 
 async def run_async_migrations() -> None:
-    """Online режим — применяет миграции напрямую."""
-    from app.core.database import _build_async_url, _build_ssl_context
+    from app.core.database import _build_async_url
     from app.core.config import settings
+    import ssl
 
     url = _build_async_url(settings.DATABASE_URL)
-    ssl_ctx = _build_ssl_context(settings.DATABASE_URL)
 
-    connect_args = {"ssl": ssl_ctx} if ssl_ctx else {}
+    ssl_ctx = ssl.create_default_context()
+    ssl_ctx.check_hostname = False
+    ssl_ctx.verify_mode = ssl.CERT_NONE
 
     connectable = create_async_engine(
         url,
         poolclass=pool.NullPool,
-        connect_args=connect_args,
+        connect_args={"ssl": ssl_ctx},
     )
 
     async with connectable.connect() as connection:

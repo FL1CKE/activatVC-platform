@@ -19,18 +19,11 @@ def _build_async_url(url: str) -> str:
     return url
 
 
-def _build_ssl_context(url: str) -> ssl.SSLContext | None:
-    """Возвращает SSL контекст если нужен, иначе None."""
-    needs_ssl = any(x in url for x in [
-        'render.com', 'supabase.co', 'neon.tech', 'amazonaws.com'
-    ])
-    if not needs_ssl:
-        return None
-
+def _build_ssl_context(url: str) -> ssl.SSLContext:
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
-    return ctx
+    return ctx  # Supabase всегда требует SSL
 
 
 _async_url = _build_async_url(settings.DATABASE_URL)
@@ -41,7 +34,7 @@ engine = create_async_engine(
     echo=settings.DEBUG,
     pool_pre_ping=True,
     pool_recycle=3600,
-    connect_args={"ssl": _ssl_ctx} if _ssl_ctx else {},
+    connect_args={"ssl": _build_ssl_context(_async_url)},
 )
 
 AsyncSessionLocal = async_sessionmaker(
