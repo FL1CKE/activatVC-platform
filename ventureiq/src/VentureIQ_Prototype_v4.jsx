@@ -699,6 +699,11 @@ function Form({go}){
         text: lang === 'ru' ? '✓ Анализ завершён! Результаты готовы.' : '✓ Analysis complete! Results ready.',
         color: T.green,
       }]);
+
+      // Переходим на дашборд инвестора с данными анализа
+      setTimeout(() => {
+        go(SC.INVESTOR, { co, founders, runResult: completed });
+      }, 1200);
     } catch (err) {
       console.error('Submit error:', err);
       setSubmitError(err.message);
@@ -1009,42 +1014,342 @@ function Form({go}){
   );
 }
 
-// ─── InvestorPage ─────────────────────────────────────────────────────────────
+// ─── InvestorPage — полноценный дашборд инвестора ────────────────────────────
 
-function InvestorPage({go}){
-  return(
-    <div style={{position:'fixed',inset:0,zIndex:1000,background:'#fff'}}>
-      <iframe
-        src="/investor.html"
-        style={{width:'100%',height:'100%',border:'none',display:'block'}}
-        title="Инвесторам — VentureIQ"
-      />
-      {/* Слушаем postMessage от investor.html для кнопки «Главная» */}
-      <IframeBackListener onBack={()=>go(SC.HOME)}/>
-    </div>
+const AGENT_META = {
+  'CMO+CCO': { color:'#3b82f6', role:'Chief Marketing & Commercial Officer' },
+  'CLO':     { color:'#8b5cf6', role:'Chief Legal Officer' },
+  'CFO':     { color:'#f59e0b', role:'Chief Financial Officer' },
+  'CPO+CTO': { color:'#16a34a', role:'Chief Product & Technology Officer' },
+  'CRO':     { color:'#ef4444', role:'Chief Risk Officer' },
+  'CHRO':    { color:'#06b6d4', role:'Chief Human Resources Officer' },
+  'FAA':     { color:'#ec4899', role:'Founder Assessment Agent' },
+  'RCA':     { color:'#a855f7', role:'Reference Check Agent' },
+};
+
+// Парсит Investment Score из текста отчёта агента
+function extractScore(content) {
+  if (!content) return null;
+  const m = content.match(/(?:SCORE[^\d]*|score[^\d]*)(\d{1,3})(?:\/100|\s*\/\s*100)?/i)
+    || content.match(/\b(\d{2,3})\s*\/\s*100\b/)
+    || content.match(/\*\*(\d{2,3})\*\*/);
+  if (m) { const n = parseInt(m[1]); if (n >= 0 && n <= 100) return n; }
+  return null;
+}
+
+// Средний балл по всем агентам
+function calcAvgScore(tasks) {
+  const scores = tasks.map(t => extractScore(t.report_content)).filter(s => s !== null);
+  if (!scores.length) return null;
+  return Math.round(scores.reduce((a,b) => a+b, 0) / scores.length);
+}
+
+// Вердикт по баллу
+function verdict(score) {
+  if (score === null) return { label:'Анализируется', color:'#6b7280', bg:'#f3f4f6' };
+  if (score >= 75) return { label:'Одобрено', color:'#16a34a', bg:'#f0fdf4' };
+  if (score >= 60) return { label:'Conditional', color:'#92400e', bg:'#fefce8' };
+  if (score >= 45) return { label:'На рассмотрении', color:'#1d4ed8', bg:'#eff6ff' };
+  return { label:'Отказано', color:'#dc2626', bg:'#fef2f2' };
+}
+
+// Мини SVG радар
+function RadarChart({ scores }) {
+  const cx = 145, cy = 112, maxR = 64;
+  const keys = ['CMO+CCO','CLO','CFO','CPO+CTO','CRO','CHRO'];
+  // 6 осей, 0°=top, шаг 60°
+  const pts = keys.map((k, i) => {
+    const angle = (i * 60 - 90) * Math.PI / 180;
+    const r = ((scores[k] || 0) / 100) * maxR;
+    return [cx + r * Math.cos(angle), cy + r * Math.sin(angle)];
+  });
+  const poly = pts.map(p => p.join(',')).join(' ');
+
+  const gridPts = (frac) => keys.map((_, i) => {
+    const angle = (i * 60 - 90) * Math.PI / 180;
+    const r = frac * maxR;
+    return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
+  }).join(' ');
+
+  const labels = [
+    {x:145, y:38, anchor:'middle', text:'CMO+CCO'},
+    {x:216, y:82, anchor:'start',  text:'CLO'},
+    {x:210, y:150,anchor:'start',  text:'CFO'},
+    {x:145, y:195,anchor:'middle', text:'CPO+CTO'},
+    {x:72,  y:150,anchor:'end',    text:'CRO'},
+    {x:76,  y:82, anchor:'end',    text:'CHRO'},
+  ];
+
+  return (
+    <svg width="290" height="220" viewBox="0 0 290 220" xmlns="http://www.w3.org/2000/svg">
+      <style>{`.rl{font-size:11px;font-family:-apple-system,sans-serif;fill:#6b6b6b}`}</style>
+      {[1,.75,.5,.25].map(f => (
+        <polygon key={f} points={gridPts(f)} fill="none" stroke="#e5e5e5" strokeWidth="0.75"/>
+      ))}
+      {keys.map((_,i) => {
+        const angle = (i * 60 - 90) * Math.PI / 180;
+        return <line key={i} x1={cx} y1={cy} x2={cx+maxR*Math.cos(angle)} y2={cy+maxR*Math.sin(angle)} stroke="#e5e5e5" strokeWidth="0.75"/>;
+      })}
+      <polygon points={poly} fill="#3b82f6" fillOpacity="0.18" stroke="#3b82f6" strokeWidth="2"/>
+      {labels.map((l,i) => <text key={i} x={l.x} y={l.y} textAnchor={l.anchor} className="rl">{l.text}</text>)}
+    </svg>
   );
 }
 
-function IframeBackListener({onBack}){
-  useEffect(()=>{
-    function handler(e){
-      if(e.data==='ventureiq:go-home') onBack();
+function InvestorPage({ go, submissionData }) {
+  // submissionData = { co, founders, runResult } или null (открыт напрямую)
+  const hasData = submissionData && submissionData.runResult;
+  const tasks = hasData ? (submissionData.runResult.tasks || []) : [];
+  const co = hasData ? submissionData.co : null;
+  const founders = hasData ? submissionData.founders : [];
+
+  // Строим карту score по role
+  const scoreMap = {};
+  tasks.forEach(t => {
+    if (t.agent_role && t.report_content) {
+      const s = extractScore(t.report_content);
+      if (s !== null) scoreMap[t.agent_role] = s;
     }
-    window.addEventListener('message',handler);
-    return()=>window.removeEventListener('message',handler);
-  },[onBack]);
-  return null;
+  });
+
+  const avgScore = hasData ? calcAvgScore(tasks) : null;
+  const verd = verdict(avgScore);
+  const companyName = co?.company || 'Стартап';
+  const stage = co?.stage || '';
+
+  // Состояние для раскрытых отчётов агентов
+  const [expanded, setExpanded] = useState({});
+  const toggleExpand = (role) => setExpanded(p => ({...p, [role]: !p[role]}));
+
+  // Воронка sidebar
+  const funnelItems = [
+    { label:'Все заявки', count:hasData?1:8, dot:null },
+    { label:'Готово к решению', count:hasData?(avgScore>=60?1:0):2, dot:null },
+    { label:'На доработке', count:0, dot:'#f97316' },
+    { label:'Gap Review', count:0, dot:'#f59e0b' },
+    { label:'На рассмотрении', count:hasData&&avgScore<60?1:1, dot:'#3b82f6', active:true },
+    { label:'Одобрено', count:hasData&&avgScore>=75?1:1, dot:'#16a34a' },
+    { label:'WATCH', count:1, dot:'#0e7490' },
+    { label:'Отказано', count:0, dot:'#9ca3af' },
+  ];
+
+  const ddTasks = tasks.filter(t => Object.keys(AGENT_META).includes(t.agent_role) && t.agent_role !== 'FAA' && t.agent_role !== 'RCA');
+
+  return (
+    <div style={{fontFamily:'-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif',background:'#f1f0ec',color:'#1a1a1a',fontSize:14,lineHeight:1.5,height:'100vh',display:'flex',overflow:'hidden'}}>
+
+      {/* ── SIDEBAR ── */}
+      <nav style={{width:224,minWidth:224,background:'#fff',borderRight:'0.5px solid rgba(0,0,0,.1)',display:'flex',flexDirection:'column',height:'100vh',overflowY:'auto'}}>
+        <div style={{padding:'20px 20px 14px',borderBottom:'0.5px solid rgba(0,0,0,.1)'}}>
+          <div style={{fontSize:10,color:'#9b9b9b',letterSpacing:'.08em',textTransform:'uppercase',marginBottom:2}}>Activat VC</div>
+          <div style={{fontSize:19,fontWeight:600}}>VentureIQ</div>
+        </div>
+        <div style={{display:'flex',borderBottom:'0.5px solid rgba(0,0,0,.1)'}}>
+          {[['1','Проектов'],['—','AVG'],[hasData?'100%':'0%','Конв.']].map(([v,l],i)=>(
+            <div key={i} style={{flex:1,textAlign:'center',padding:'12px 6px',borderRight:i<2?'0.5px solid rgba(0,0,0,.1)':'none'}}>
+              <div style={{fontSize:19,fontWeight:600}}>{v}</div>
+              <div style={{fontSize:9,color:'#9b9b9b',textTransform:'uppercase',letterSpacing:'.06em',marginTop:2}}>{l}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{fontSize:10,color:'#9b9b9b',letterSpacing:'.09em',textTransform:'uppercase',padding:'16px 20px 8px'}}>Воронка</div>
+        {funnelItems.map((item,i)=>(
+          <div key={i} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'7px 20px',cursor:'pointer',background:item.active?'#f8f8f7':'transparent'}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,flex:1}}>
+              {item.dot && <div style={{width:8,height:8,borderRadius:'50%',background:item.dot,flexShrink:0}}/>}
+              <span style={{fontSize:13,color:item.active?'#1a1a1a':'#6b6b6b'}}>{item.label}</span>
+            </div>
+            <span style={{fontSize:11,color:'#6b6b6b',background:'#f8f8f7',border:'0.5px solid rgba(0,0,0,.1)',borderRadius:12,padding:'1px 8px'}}>{item.count}</span>
+          </div>
+        ))}
+        <div style={{marginTop:'auto',borderTop:'0.5px solid rgba(0,0,0,.1)',padding:'14px 20px',display:'flex',flexDirection:'column',gap:8}}>
+          <div onClick={()=>go(SC.HOME)} style={{fontSize:13,color:'#6b6b6b',cursor:'pointer',padding:'3px 0'}}>← Главная</div>
+          <div onClick={()=>go(SC.FORM)} style={{fontSize:13,color:'#6b6b6b',cursor:'pointer',padding:'3px 0'}}>+ Новая заявка</div>
+        </div>
+      </nav>
+
+      {/* ── MAIN ── */}
+      <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+
+        {/* Topbar */}
+        <div style={{background:'#fff',borderBottom:'0.5px solid rgba(0,0,0,.1)',padding:'0 28px',height:50,display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+          <span style={{fontSize:14,color:'#6b6b6b',cursor:'pointer'}} onClick={()=>go(SC.HOME)}>Dashboard</span>
+          <span style={{color:'#9b9b9b',fontSize:12}}>›</span>
+          <span style={{fontSize:14,fontWeight:500}}>{companyName}</span>
+          {hasData && (
+            <span style={{borderRadius:20,padding:'2px 11px',fontSize:12,fontWeight:500,background:verd.bg,color:verd.color,border:`0.5px solid ${verd.color}44`}}>
+              {verd.label}
+            </span>
+          )}
+          {!hasData && (
+            <span style={{borderRadius:20,padding:'2px 11px',fontSize:12,fontWeight:500,background:'#fefce8',color:'#92400e',border:'0.5px solid #fcd34d'}}>
+              Демо
+            </span>
+          )}
+          <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:14}}>
+            <div style={{width:34,height:34,borderRadius:'50%',background:'#1a1a2e',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:500}}>A</div>
+            <div>
+              <div style={{fontSize:13,fontWeight:500}}>Investor</div>
+              <div style={{fontSize:11,color:'#6b6b6b'}}>Activat VC</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div style={{flex:1,overflowY:'auto',padding:'24px 28px',display:'flex',flexDirection:'column',gap:20}}>
+
+          {/* ── Нет данных — демо карточка ── */}
+          {!hasData && (
+            <div style={{background:'#fff',border:'0.5px solid rgba(0,0,0,.1)',borderRadius:12,padding:'32px',textAlign:'center'}}>
+              <div style={{fontSize:40,marginBottom:12}}>📋</div>
+              <div style={{fontSize:18,fontWeight:600,marginBottom:8}}>Здесь появится отчёт</div>
+              <div style={{fontSize:13,color:'#6b6b6b',marginBottom:20,maxWidth:400,margin:'0 auto 20px'}}>
+                Заполните форму фаундера и нажмите «Отправить на рассмотрение» — агенты проанализируют проект и результат появится здесь автоматически.
+              </div>
+              <button onClick={()=>go(SC.FORM)} style={{display:'inline-flex',alignItems:'center',gap:8,padding:'10px 24px',borderRadius:10,background:'linear-gradient(135deg,#1d6bfc,#6366f1)',border:'none',color:'#fff',fontSize:14,fontWeight:600,cursor:'pointer'}}>
+                Подать заявку →
+              </button>
+            </div>
+          )}
+
+          {/* ── Project Card ── */}
+          {hasData && (
+            <div style={{background:'#fff',border:'0.5px solid rgba(0,0,0,.1)',borderRadius:12,padding:'22px 26px'}}>
+              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',gap:20}}>
+                <div style={{flex:1}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:8,flexWrap:'wrap'}}>
+                    <span style={{fontSize:28,fontWeight:700}}>{companyName}</span>
+                    {stage && <span style={{background:'#f8f8f7',color:'#6b6b6b',border:'0.5px solid rgba(0,0,0,.1)',borderRadius:20,padding:'2px 10px',fontSize:12}}>{stage}</span>}
+                    {founders[0]?.country && <span style={{background:'#f8f8f7',color:'#6b6b6b',border:'0.5px solid rgba(0,0,0,.1)',borderRadius:20,padding:'2px 10px',fontSize:12}}>{founders[0].country}</span>}
+                    <span style={{fontSize:12,color:'#9b9b9b'}}>· только что</span>
+                  </div>
+                  <div style={{fontSize:13,color:'#6b6b6b',marginBottom:14}}>
+                    {co?.desc ? co.desc.slice(0,120) + (co.desc.length > 120 ? '…' : '') : 'Анализ завершён'}
+                  </div>
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap',marginBottom:16}}>
+                    {[co?.stage, co?.activity, founders[0]?.country].filter(Boolean).map((tag,i)=>(
+                      <span key={i} style={{background:'#f8f8f7',color:'#1a1a1a',border:'0.5px solid rgba(0,0,0,.1)',borderRadius:20,padding:'3px 13px',fontSize:12}}>{tag}</span>
+                    ))}
+                  </div>
+                  <button
+                    onClick={() => {
+                      // Собираем текст отчёта из всех агентов
+                      const reportText = tasks.map(t =>
+                        `## ${t.agent_role} (${t.agent_name || ''})\n\n${t.report_content || 'Нет данных'}\n\n---\n`
+                      ).join('\n');
+                      const blob = new Blob([reportText], {type:'text/markdown'});
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      a.href = url; a.download = `${companyName}_report.md`; a.click();
+                      URL.revokeObjectURL(url);
+                    }}
+                    style={{display:'inline-flex',alignItems:'center',gap:7,background:'transparent',border:'1.5px solid #16a34a',color:'#16a34a',borderRadius:8,padding:'7px 16px',fontSize:13,cursor:'pointer',fontFamily:'inherit'}}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    Скачать полный отчёт
+                  </button>
+                </div>
+                {/* Score box */}
+                <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',minWidth:130,flexShrink:0}}>
+                  <div style={{fontSize:56,fontWeight:700,color:'#16a34a',lineHeight:1}}>{avgScore ?? '—'}</div>
+                  <div style={{color:'#16a34a',fontSize:13,fontWeight:600,marginTop:2}}>↑ новый</div>
+                  <div style={{width:115,marginTop:7}}>
+                    <div style={{height:5,background:'#f8f8f7',borderRadius:3}}>
+                      <div style={{height:5,background:'#16a34a',borderRadius:3,width:`${avgScore||0}%`}}/>
+                    </div>
+                  </div>
+                  <div style={{fontSize:10,color:'#9b9b9b',textAlign:'right',marginTop:3,letterSpacing:'.04em'}}>INVESTMENT SCORE &nbsp; {avgScore??'—'}/100</div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Agent Analysis Card ── */}
+          {hasData && ddTasks.length > 0 && (
+            <div style={{background:'#fff',border:'0.5px solid rgba(0,0,0,.1)',borderRadius:12,padding:'22px 26px'}}>
+              <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',marginBottom:4}}>
+                <div>
+                  <div style={{fontSize:16,fontWeight:500}}>Agent Analysis</div>
+                  <div style={{fontSize:12,color:'#6b6b6b',marginBottom:22}}>{ddTasks.length} агентов проанализировали проект</div>
+                </div>
+              </div>
+              <div style={{display:'flex',gap:24,alignItems:'center',flexWrap:'wrap'}}>
+                <RadarChart scores={scoreMap}/>
+                <div style={{flex:1,minWidth:260,display:'flex',flexDirection:'column',gap:11}}>
+                  {ddTasks.map(task => {
+                    const meta = AGENT_META[task.agent_role] || {color:'#6b7280',role:''};
+                    const score = extractScore(task.report_content);
+                    return (
+                      <div key={task.id}>
+                        <div style={{display:'flex',alignItems:'center',gap:10}}>
+                          <div style={{width:10,height:10,borderRadius:'50%',background:meta.color,flexShrink:0}}/>
+                          <div style={{minWidth:100}}>
+                            <div style={{fontSize:13,fontWeight:500}}>{task.agent_role}</div>
+                            <div style={{fontSize:11,color:'#6b6b6b'}}>{meta.role}</div>
+                          </div>
+                          <div style={{flex:1,height:5,background:'#f8f8f7',borderRadius:3}}>
+                            <div style={{height:5,borderRadius:3,background:meta.color,width:`${score||0}%`,transition:'width .6s'}}/>
+                          </div>
+                          <div style={{fontSize:13,fontWeight:600,minWidth:26,textAlign:'right',color:meta.color}}>{score ?? '—'}</div>
+                          <span
+                            onClick={()=>toggleExpand(task.agent_role)}
+                            title="Показать отчёт"
+                            style={{color:'#9b9b9b',cursor:'pointer',fontSize:13,padding:'2px 4px',userSelect:'none'}}
+                          >
+                            {expanded[task.agent_role] ? '▲' : '↓'}
+                          </span>
+                        </div>
+                        {/* Раскрытый отчёт агента */}
+                        {expanded[task.agent_role] && task.report_content && (
+                          <div style={{marginTop:10,marginLeft:20,padding:'14px 16px',background:'#f8fafc',borderRadius:10,border:'1px solid #e2e8f0',fontSize:12,color:'#334155',lineHeight:1.7,maxHeight:400,overflowY:'auto',whiteSpace:'pre-wrap',wordBreak:'break-word'}}>
+                            {task.report_content}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Анализ идёт ── */}
+          {hasData && tasks.some(t => t.status === 'running' || t.status === 'pending') && (
+            <div style={{background:'#fff',border:'0.5px solid rgba(0,0,0,.1)',borderRadius:12,padding:'22px 26px',display:'flex',alignItems:'center',gap:14}}>
+              <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+              <span style={{display:'inline-block',width:18,height:18,border:'2px solid #1d6bfc',borderTopColor:'transparent',borderRadius:'50%',animation:'spin .8s linear infinite'}}/>
+              <div>
+                <div style={{fontSize:14,fontWeight:500}}>Агенты анализируют проект…</div>
+                <div style={{fontSize:12,color:'#6b6b6b'}}>
+                  {tasks.filter(t=>t.status==='completed').length} / {tasks.length} завершено
+                </div>
+              </div>
+            </div>
+          )}
+
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App(){
-  const [screen,setScreen]=useState(SC.HOME);
+  const [screen, setScreen] = useState(SC.HOME);
+  // submissionData передаётся из Form в InvestorPage после успешного анализа
+  const [submissionData, setSubmissionData] = useState(null);
+
+  function navigate(s, data) {
+    if (data) setSubmissionData(data);
+    setScreen(s);
+  }
+
   return(
     <div style={{fontFamily:'-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif',background:'#fff',minHeight:'100vh',WebkitFontSmoothing:'antialiased'}}>
-      {screen===SC.HOME&&<Home go={s=>setScreen(s)}/>}
-      {screen===SC.FORM&&<Form go={s=>setScreen(s)}/>}
-      {screen===SC.INVESTOR&&<InvestorPage go={s=>setScreen(s)}/>}
+      {screen===SC.HOME && <Home go={navigate}/>}
+      {screen===SC.FORM && <Form go={navigate}/>}
+      {screen===SC.INVESTOR && <InvestorPage go={navigate} submissionData={submissionData}/>}
     </div>
   );
 }

@@ -28,5 +28,7 @@ alembic upgrade head
 echo "🌱 Seeding agents..."
 python -m app.scripts.seed_agents
 
-echo "🚀 Starting on :8000"
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --log-level info
+# Railway передаёт порт через $PORT, дефолт 8000
+APP_PORT=${PORT:-8000}
+echo "🚀 Starting on :${APP_PORT}"
+exec uvicorn app.main:app --host 0.0.0.0 --port "${APP_PORT}" --workers 1 --log-level info
