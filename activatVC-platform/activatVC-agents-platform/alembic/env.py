@@ -66,14 +66,19 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Online режим — применяет миграции напрямую."""
-    from sqlalchemy.ext.asyncio import create_async_engine
+    from app.core.database import _build_async_url, _build_ssl_context
     from app.core.config import settings
 
-    url = settings.DATABASE_URL
-    # Убеждаемся, что используется async драйвер
-    url = url.replace("postgresql+psycopg2://", "postgresql+asyncpg://")
+    url = _build_async_url(settings.DATABASE_URL)
+    ssl_ctx = _build_ssl_context(settings.DATABASE_URL)
 
-    connectable = create_async_engine(url, poolclass=pool.NullPool)
+    connect_args = {"ssl": ssl_ctx} if ssl_ctx else {}
+
+    connectable = create_async_engine(
+        url,
+        poolclass=pool.NullPool,
+        connect_args=connect_args,
+    )
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
