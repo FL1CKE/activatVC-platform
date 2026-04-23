@@ -87,7 +87,13 @@ async def run_async_migrations() -> None:
 
 
 def run_migrations_online() -> None:
-    asyncio.run(run_async_migrations())
+    try:
+        asyncio.run(run_async_migrations())
+    except Exception as e:
+        import traceback
+        print("MIGRATION ERROR:", e)
+        traceback.print_exc()
+        raise
 
 
 if context.is_offline_mode():
