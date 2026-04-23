@@ -19,7 +19,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "0004"
-down_revision = "0003"
+down_revision = "0003_add_prompt_set_tag"
 branch_labels = None
 depends_on = None
 
